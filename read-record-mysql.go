@@ -8,11 +8,19 @@ import(
 	_"github.com/go-sql-driver/mysql" 
 	"github.com/gorilla/mux"
 	"io/ioutil"
+	"time"
+	jwt "github.com/dgrijalva/jwt-go"
+
 )
+
 const(
 	CONN_PORT = "8080"
 	DRIVER_NAME = "mysql"
 	DATA_SOURCE_NAME = "root:1111@/library"
+	ADMIN_USER = "admin"
+	ADMIN_PASSWORD = "admin"
+	CLAIM_ISSUER = "Packt"
+	CLAIM_EXPIRY_IN_HOURS = 24
 )
 var db *sql.DB
 var connectionError error
@@ -23,10 +31,17 @@ func init(){
 	}
 }
 type Book struct{
-Id int `json:"bid"`
-Name string `json:"bookname"`
-Year string `json:"year"`
+	Id int `json:"bid"`
+	Name string `json:"bookname"`
+	Year string `json:"year"`
 }
+
+type User struct{
+	Uid int `json:"uid"`
+	Log string `json:"log"`
+	Pas string `json:"pas"`
+}
+
 func getBooks(w http.ResponseWriter, r *http.Request){
 	log.Print("reading records from database")
 	rows, err := db.Query("SELECT * FROM books")
@@ -123,13 +138,99 @@ func createBook(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintf(w, "Book with Id = %s was deleted", params["Id"])
   }
 
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	stmt, err := db.Prepare("INSERT INTO users(log, pas) VALUES(?,?)")
+	if err != nil {
+	  panic(err.Error())
+	}
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+	  panic(err.Error())
+	}
+	keyVal := make(map[string]string)
+	
+	json.Unmarshal(body, &keyVal)
+	log := keyVal["log"]
+	pas := keyVal["pas"]
+	_, err = stmt.Exec(log, pas)
+	if err != nil {
+	  panic(err.Error())
+	}
+	fmt.Fprintf(w, "New user was created")
+}
+
+func getUsers(w http.ResponseWriter, r *http.Request){
+	log.Print("reading records from database")
+	rows, err := db.Query("SELECT * FROM users")
+	if err != nil{
+		log.Print("error occurred while executing select query :: ",err)
+		return
+	}
+	users := []User{}
+	for rows.Next(){
+		var uid int
+		var log string
+		var pas string
+		err = rows.Scan(&uid, &log, &pas)
+		user := User{Uid: uid, Log: log, Pas: pas}
+		users = append(users, user)
+	}
+	json.NewEncoder(w).Encode(users)
+}
+
+func getUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	params := mux.Vars(r)
+	log.Print("reading a record from database")
+	result, err := db.Query("SELECT uid, log, pas FROM users WHERE uid = ?", params["uid"])
+	if err != nil {
+	  panic(err.Error())
+	}
+	defer result.Close()
+	var user User
+	for result.Next() {
+	  err := result.Scan(&user.Uid, &user.Log, &user.Pas)
+	  if err != nil {
+		panic(err.Error())
+	  }
+	}
+	json.NewEncoder(w).Encode(user)
+}
+
+
+var signature = []byte("secret")
+func getToken(w http.ResponseWriter, r *http.Request){
+	claims := &jwt.StandardClaims{
+	ExpiresAt: time.Now().Add(time.Hour * CLAIM_EXPIRY_IN_HOURS).Unix(),
+	Issuer: CLAIM_ISSUER,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, _ := token.SignedString(signature)
+
+	w.Write([]byte(tokenString))
+}
+
+func getStatus(w http.ResponseWriter, r *http.Request){
+	w.Write([]byte("API is up and running"))
+}
+
 func main(){
 	router := mux.NewRouter()
+
 	router.HandleFunc("/books", getBooks).Methods("GET")
 	router.HandleFunc("/books/{Id}", getBook).Methods("GET")
 	router.HandleFunc("/books", createBook).Methods("POST")
 	router.HandleFunc("/books/{Id}", updateBook).Methods("PUT")
 	router.HandleFunc("/books/{Id}", deleteBook).Methods("DELETE")
+	router.HandleFunc("/users", createUser).Methods("POST")
+	router.HandleFunc("/users", getUsers).Methods("GET")
+	router.HandleFunc("/users/{uid}", getUser).Methods("GET")
+
+	router.HandleFunc("/status", getStatus).Methods("GET")
+	router.HandleFunc("/get-token", getToken).Methods("GET")
+
 	defer db.Close()
 	err := http.ListenAndServe(":"+CONN_PORT, router)
 	if err != nil{
