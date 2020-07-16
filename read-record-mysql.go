@@ -1,4 +1,5 @@
 package main
+
 import(
 	"fmt"
 	"database/sql" 
@@ -10,7 +11,6 @@ import(
 	"io/ioutil"
 	"time"
 	jwt "github.com/dgrijalva/jwt-go"
-
 )
 
 const(
@@ -34,6 +34,7 @@ type Book struct{
 	Id int `json:"bid"`
 	Name string `json:"bookname"`
 	Year string `json:"year"`
+	User int `json:"uid"`
 }
 
 type User struct{
@@ -41,6 +42,7 @@ type User struct{
 	Log string `json:"log"`
 	Pas string `json:"pas"`
 }
+var user User
 
 func getBooks(w http.ResponseWriter, r *http.Request){
 	log.Print("reading records from database")
@@ -54,8 +56,9 @@ func getBooks(w http.ResponseWriter, r *http.Request){
 		var bid int
 		var bookname string
 		var year string
-		err = rows.Scan(&bid, &bookname, &year)
-		book := Book{Id: bid, Name: bookname, Year: year}
+		var uid int
+		err = rows.Scan(&bid, &bookname, &year, &uid)
+		book := Book{Id: bid, Name: bookname, Year: year, User: uid}
 		books = append(books, book)
 	}
 	json.NewEncoder(w).Encode(books)
@@ -65,14 +68,14 @@ func getBook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 	log.Print("reading a record from database")
-	result, err := db.Query("SELECT bid, bookname, year FROM books WHERE bid = ?", params["Id"])
+	result, err := db.Query("SELECT * FROM books WHERE bid = ?", params["Id"])
 	if err != nil {
 	  panic(err.Error())
 	}
 	defer result.Close()
 	var book Book
 	for result.Next() {
-	  err := result.Scan(&book.Id, &book.Name, &book.Year)
+	  err := result.Scan(&book.Id, &book.Name, &book.Year, &book.User)
 	  if err != nil {
 		panic(err.Error())
 	  }
@@ -139,6 +142,19 @@ func createBook(w http.ResponseWriter, r *http.Request) {
   }
 
 
+  func deleteUser(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	stmt, err := db.Prepare("DELETE FROM users WHERE uid = ?")
+	if err != nil {
+	  panic(err.Error())
+	}
+	_, err = stmt.Exec(params["Uid"])
+   if err != nil {
+	  panic(err.Error())
+	}
+  fmt.Fprintf(w, "User with uid = %s was deleted", params["Uid"])
+  }
+
 func createUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	stmt, err := db.Prepare("INSERT INTO users(log, pas) VALUES(?,?)")
@@ -184,12 +200,11 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 	log.Print("reading a record from database")
-	result, err := db.Query("SELECT uid, log, pas FROM users WHERE uid = ?", params["uid"])
+	result, err := db.Query("SELECT * FROM users WHERE uid = ?", params["uid"])
 	if err != nil {
 	  panic(err.Error())
 	}
 	defer result.Close()
-	var user User
 	for result.Next() {
 	  err := result.Scan(&user.Uid, &user.Log, &user.Pas)
 	  if err != nil {
@@ -200,11 +215,12 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 }
 
 
-var signature = []byte("secret")
+var signature = []byte(user.Pas)
+
 func getToken(w http.ResponseWriter, r *http.Request){
 	claims := &jwt.StandardClaims{
-	ExpiresAt: time.Now().Add(time.Hour * CLAIM_EXPIRY_IN_HOURS).Unix(),
-	Issuer: CLAIM_ISSUER,
+		ExpiresAt: time.Now().Add(time.Hour * CLAIM_EXPIRY_IN_HOURS).Unix(),
+		Issuer: CLAIM_ISSUER,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, _ := token.SignedString(signature)
@@ -215,6 +231,7 @@ func getToken(w http.ResponseWriter, r *http.Request){
 func getStatus(w http.ResponseWriter, r *http.Request){
 	w.Write([]byte("API is up and running"))
 }
+
 
 func main(){
 	router := mux.NewRouter()
@@ -227,10 +244,11 @@ func main(){
 	router.HandleFunc("/users", createUser).Methods("POST")
 	router.HandleFunc("/users", getUsers).Methods("GET")
 	router.HandleFunc("/users/{uid}", getUser).Methods("GET")
-
+	router.HandleFunc("/users/{uid}", deleteUser).Methods("DELETE")
 	router.HandleFunc("/status", getStatus).Methods("GET")
 	router.HandleFunc("/get-token", getToken).Methods("GET")
-
+	
+	
 	defer db.Close()
 	err := http.ListenAndServe(":"+CONN_PORT, router)
 	if err != nil{
