@@ -252,8 +252,7 @@ func main(){
 	router.HandleFunc("/users/{uid}", getUser).Methods("GET")
 	router.HandleFunc("/users/{uid}",deleteUser).Methods("DELETE")
 	router.HandleFunc("/books", Middleware(getBooks)).Methods("GET")
-	//router.HandleFunc("/token", LoginHandler).Methods("POST")
-
+	
 	defer db.Close()
 	err := http.ListenAndServe(":"+CONN_PORT, router)
 	if err != nil{

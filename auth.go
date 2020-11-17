@@ -53,9 +53,9 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//only one tenant per uzer
-	err = db.QueryRow(`SELECT users.uid, users.email, users.uid as users_uid, users.email as users_email
-						FROM admin
-						WHERE email=? AND pass=?`, credsRequest.Email, credsRequest.Pass).Scan(&credsDB.ID, &credsDB.Email, &user.Uid, &user.Email)
+	err = db.QueryRow(`SELECT uid, email
+						FROM users
+						WHERE email=? AND pass=?`, credsRequest.Email, credsRequest.Pass).Scan(&credsDB.ID, &credsDB.Email)
 
 	if err != nil || credsDB.ID == 0 {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -102,6 +102,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		tokenString,
 	})
 	fmt.Fprintf(w, string(b))
+	print("lala")
 
 }
 
